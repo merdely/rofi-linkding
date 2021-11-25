@@ -1,0 +1,131 @@
+#!/bin/sh
+
+# Cache File Lifetime in Seconds (can be overridden with ~/.linkdingrc)
+cache_lifetime=$((15*60))
+# Cache File Location
+cache_file=$HOME/.cache/rofi-linkding
+# Config file with LinkDing API Key in it
+linkrc=$HOME/.linkdingrc
+
+if !which jq > /dev/null 2>&1; then
+  echo "Error: Cannot find jq command" > /dev/stderr
+  exit 1
+fi
+
+synccache=0
+showing=Titles
+case "$ROFI_RETV" in
+  # ROFI_RETV = 10: Show Titles (Alt+1)
+  10)
+    showing=Titles
+    ;;
+  # ROFI_RETV = 11: Show Tags (Alt+2)
+  11)
+    showing=Tags
+    ;;
+  # ROFI_RETV = 12: Show Links (Alt+3)
+  12)
+    showing=Links
+    ;;
+  # ROFI_RETV = 13: Show all (Alt+4)
+  13)
+    showing=All
+    ;;
+  # ROFI_RETV = 19: Reload cache (Alt+0)
+  19)
+    synccache=1
+    ;;
+esac
+rofi_msg="<b>Alt+1</b>:Titles | <b>Alt+2</b>:Tags | <b>Alt+3</b>:Links | <b>Alt+4</b>:All | <b>Alt+0</b>:Reload cache"
+
+# Rofi Prompt
+echo -en "\0prompt\x1fBookmark\n"
+# Rofi Message
+echo -en "\0message\x1f<b>Showing</b>:$showing | $rofi_msg\n"
+# Rofi Option to use Hot Keys
+echo -en "\0use-hot-keys\x1ftrue\n"
+# Rofi Option to use Markup in Rows
+# echo -en "\0markup-rows\x1ftrue\n"
+
+# Debugging
+#echo ROFI_RETV=$ROFI_RETV > /dev/stderr
+#echo ROFI_INFO=$ROFI_INFO > /dev/stderr
+
+# Read the API key from the config file
+linkurl=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="url:"{print $2}' $linkrc)
+linkapikey=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="apikey:"{print $2}' $linkrc)
+lifetime=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="cache_lifetime:"{print $2}' $linkrc)
+[ -z "$linkurl" ] && echo "Error: Cannot read LinkDing URL from $linkrc" > /dev/stderr && exit 1
+[ -z "$linkapikey" ] && echo "Error: Cannot read API Key from $linkrc" > /dev/stderr && exit 1
+[[ "$lifetime" =~ ^[0-9]+$ ]] && cache_lifetime=$lifetime
+
+# Create the ~/.cache directory if it doesn't exist
+[ ! -d "${cache_file%/*}" ] && mkdir -p "${cache_file%/*}"
+
+# If the cache_file doesn't exist, cache_time is 0
+if [ ! -r $cache_file ]; then
+  cache_time=0
+else
+  cache_time=$(stat -c %Y $cache_file)
+fi
+time=$(($(date "+%s")-$cache_lifetime))
+
+update_cache() {
+  echo "Updating cache" > /dev/stderr
+  cp /dev/null $cache_file
+  tmpfile=$(mktemp)
+  next=$linkurl/api/bookmarks/
+  while [ "$next" != null ]; do
+    httpcode=$(curl -w %{http_code} -s -o $tmpfile -H "Authorization: Token $linkapikey" $next)
+
+    if [ $httpcode != 200 ]; then
+      echo "Error: Could not download bookmarks (Error code $httpcode)" > /dev/stderr
+      exit 1
+    else
+      next=$(jq -r '.next' $tmpfile)
+      # Grab the id, url, title, and tags for each bookmark
+      # If title wasn't set manually, website_title was attempted to be pulled from the Internet
+      # If, for some reason, that field is also empty, set the title to be the URL's hostname
+      jq -r '.results[] | { id: .id, url: .url, title: [.title,.website_title,.url] | (if .[0] == "" then (if .[1] == "" then (.[2] | split("/")[2]) else .[1] end) else .[0] end), tag_names: ( .tag_names | join(",") ) } | "ids[\(.id)]=\"\(.id)\";links[\(.id)]=\"\(.url)\";titles[\(.id)]=\"\(.title)\";tags[\(.id)]=\"\(.tag_names)\""' $tmpfile >> $cache_file
+    fi
+  done
+  rm -f $tmpfile
+}
+
+# If Alt+0 was pressed or the cache is stale, update the cache file from the Linkding site
+if [ "$synccache" = 1 ] || [ $cache_time -lt $time ]; then
+  update_cache
+fi
+
+# Read in the cache file into arrays
+. $cache_file
+
+# If a link was selected, using xdg-open to launch a browser and open the link
+if [ "$ROFI_RETV" = 1 ] && [ -n "$1" ]; then
+  index=$(echo $1 | awk '{print $1}')
+  if [[ "$index" =~ ^[0-9]+$ ]]; then
+    xdg-open "${links[$index]}" > /dev/null 2>&1 &
+    exit
+  fi
+fi
+
+# If no link was chosen, display a Rofi menu of links
+for id in ${ids[@]}; do
+  icon=🔗
+  [ ${links[$id]%%://*} = "https" ] && icon=🔐
+  if [ "$showing" = "Tags" ]; then
+    if [ -n "${tags[$id]}" ]; then
+      printf "%-4s $icon%-50s %s\n" $id "${tags[$id]}" "${titles[$id]}"
+    fi
+  elif [ "$showing" = "Links" ]; then
+    printf "%-4s $icon%s\n" $id "${links[$id]}"
+  elif [ "$showing" = "All" ]; then
+    if [ -n "${tags[$id]}" ]; then
+      printf "%-4s %-40s 🔖%-20s $icon%s\n" $id "${titles[$id]}" "${tags[$id]}" "${links[$id]#*://}"
+    else
+      printf "%-4s %-40s $icon%s\n" $id "${titles[$id]}" "${links[$id]#*://}"
+    fi
+  else
+    printf "%-4s $icon%s\n" $id "${titles[$id]}"
+  fi
+done
