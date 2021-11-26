@@ -5,8 +5,8 @@ Rofi Script for using Linkding Bookmarks
 
 * A Linkding site
 * A Linkding REST API (Settings -> Integrations in Linkding)
-* Install Rofi
-* Install jq
+* Install Rofi on system running rofi-linkding
+* Install jq on system running rofi-linkding
 
 # User Installation
 
