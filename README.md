@@ -3,7 +3,7 @@ Rofi Script for using Linkding Bookmarks
 
 # User Installation
 
-1. Download the latest release file
+1. Download the latest release file (1.0 in this example)
 1. Extract package: `tar -xvzf rofi-linkding-1.0.tar.gz`
 1. Change to package directory: `cd rofi-linkding-1.0`
 1. Modify 'config' with your URL & API Key
