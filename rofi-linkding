@@ -4,8 +4,31 @@
 cache_lifetime=$((15*60))
 # Cache File Location
 cache_file=$HOME/.cache/rofi-linkding
+# Define the progname variable
+progname=$(basename $0 .sh)
 # Config file with LinkDing API Key in it
-linkrc=$HOME/.linkdingrc
+etcconfig=/etc/${progname}rc
+homeconfig=$HOME/.${progname}rc
+preferredconfig=$HOME/.config/$progname/config
+unset config
+[ -r $etcconfig ] && config=$etcconfig
+[ -r $homeconfig ] && config=$homeconfig
+[ -r $preferredconfig ] && config=$preferredconfig
+
+if [ -z "$config" ] || [ ! -r $config ]; then
+  echo "Error: Config file not found" > /dev/stderr
+  echo "Looked for:" > /dev/stderr
+  echo "  1. \$HOME$(echo $preferredconfig|sed "s#^$HOME##") (preferred)" > /dev/stderr
+  echo "  2. \$HOME$(echo $homeconfig|sed "s#^$HOME##")" > /dev/stderr
+  echo "  3. $etcconfig" > /dev/stderr
+  echo > /dev/stderr
+  echo "Example configuration file:" > /dev/stderr
+  echo "  [linkding]" > /dev/stderr
+  echo "  url: http://localhost/linkding" > /dev/stderr
+  echo "  apikey: abc123" > /dev/stderr
+  echo "  lifetime: $cache_lifetime  # This setting is optional" > /dev/stderr
+  exit 1
+fi
 
 if !which jq > /dev/null 2>&1; then
   echo "Error: Cannot find jq command" > /dev/stderr
@@ -52,11 +75,11 @@ echo -en "\0use-hot-keys\x1ftrue\n"
 #echo ROFI_INFO=$ROFI_INFO > /dev/stderr
 
 # Read the API key from the config file
-linkurl=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="url:"{print $2}' $linkrc)
-linkapikey=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="apikey:"{print $2}' $linkrc)
-lifetime=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="cache_lifetime:"{print $2}' $linkrc)
-[ -z "$linkurl" ] && echo "Error: Cannot read LinkDing URL from $linkrc" > /dev/stderr && exit 1
-[ -z "$linkapikey" ] && echo "Error: Cannot read API Key from $linkrc" > /dev/stderr && exit 1
+linkurl=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="url:"{print $2}' $config)
+linkapikey=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="apikey:"{print $2}' $config)
+lifetime=$(awk 'BEGIN{p=0} $1~/^\[/{p=0} $1=="[linkding]"{p=1} p==1&&$1=="cache_lifetime:"{print $2}' $config)
+[ -z "$linkurl" ] && echo "Error: Cannot read LinkDing URL from $config" > /dev/stderr && exit 1
+[ -z "$linkapikey" ] && echo "Error: Cannot read API Key from $config" > /dev/stderr && exit 1
 [[ "$lifetime" =~ ^[0-9]+$ ]] && cache_lifetime=$lifetime
 
 # Create the ~/.cache directory if it doesn't exist
