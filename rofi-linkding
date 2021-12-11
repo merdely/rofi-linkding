@@ -35,6 +35,7 @@ if !which jq > /dev/null 2>&1; then
   exit 1
 fi
 
+copyuri=0
 synccache=0
 showing=Titles
 case "$ROFI_RETV" in
@@ -54,12 +55,16 @@ case "$ROFI_RETV" in
   13)
     showing=All
     ;;
+  # ROFI_RETV = 18: Copy URI (Alt+9)
+  18)
+    copyuri=1
+    ;;
   # ROFI_RETV = 19: Reload cache (Alt+0)
   19)
     synccache=1
     ;;
 esac
-rofi_msg="<b>Alt+1</b>:Titles | <b>Alt+2</b>:Tags | <b>Alt+3</b>:Links | <b>Alt+4</b>:All | <b>Alt+0</b>:Reload cache"
+rofi_msg="<b>Alt+1</b>:Titles | <b>Alt+2</b>:Tags | <b>Alt+3</b>:Links | <b>Alt+4</b>:All | <b>Alt+9</b>:Copy URI | <b>Alt+0</b>:Reload cache"
 
 # Rofi Prompt
 echo -en "\0prompt\x1fBookmark\n"
@@ -109,10 +114,25 @@ update_cache() {
       # Grab the id, url, title, and tags for each bookmark
       # If title wasn't set manually, website_title was attempted to be pulled from the Internet
       # If, for some reason, that field is also empty, set the title to be the URL's hostname
-      jq -r '.results[] | { id: .id, url: .url, title: [.title,.website_title,.url] | (if .[0] == "" then (if .[1] == "" then (.[2] | split("/")[2]) else .[1] end) else .[0] end), tag_names: ( .tag_names | join(",") ) } | "ids[\(.id)]=\"\(.id)\";links[\(.id)]=\"\(.url)\";titles[\(.id)]=\"\(.title)\";tags[\(.id)]=\"\(.tag_names)\""' $tmpfile >> $cache_file
+      jq -r '.results[] | { id: .id, url: .url, title: [.title,.website_title,.url] | (if .[0] == "" then (if .[1] == "" then (.[2] | split("/")[2]) else .[1] | gsub("([\\n\\t]|^ +| +$)"; "") | gsub("\""; "'"'"'") end) else .[0]  | gsub("([\\n\\t]|^ +| +$)"; "") | gsub("\""; "'"'"'") end), tag_names: ( .tag_names | join(",") ) } | "ids[\(.id)]=\"\(.id)\";links[\(.id)]=\"\(.url)\";titles[\(.id)]=\"\(.title)\";tags[\(.id)]=\"\(.tag_names)\""' $tmpfile >> $cache_file
     fi
   done
   rm -f $tmpfile
+}
+
+clipboard_copy() {
+  if [ -n "$CLIPBOARD_PROGRAM" ] && which $CLIPBOARD_PROGRAM > /dev/null 2>&1; then
+    $CLIPBOARD_PROGRAM > /dev/null 2>&1
+  elif [ "$XDG_SESSION_TYPE" = "wayland" ] && which wl-copy > /dev/null 2>&1; then
+    wl-copy > /dev/null 2>&1
+  elif which xclip > /dev/null 2>&1; then
+    xclip -selection clipboard -r > /dev/null 2>&1
+  elif which xsel > /dev/null 2>&1; then
+    xsel --clipboard --input > /dev/null 2>&1
+  else
+    echo "Error: No clipboard command found; install xclip, xsel, or wl-clipboard" > /dev/stderr
+    exit 1
+  fi
 }
 
 # If Alt+0 was pressed or the cache is stale, update the cache file from the Linkding site
@@ -122,6 +142,14 @@ fi
 
 # Read in the cache file into arrays
 . $cache_file
+
+if [ "$copyuri" = 1 ]; then
+  index=$(echo $1 | awk '{print $1}')
+
+  echo -n "${links[$index]}" | clipboard_copy
+  notify-send "URI Copied"
+  exit
+fi
 
 # If a link was selected, using xdg-open to launch a browser and open the link
 if [ "$ROFI_RETV" = 1 ] && [ -n "$1" ]; then
